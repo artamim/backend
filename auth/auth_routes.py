@@ -1,16 +1,65 @@
-from fastapi import APIRouter, HTTPException, Depends, status, Response, FastAPI
+from fastapi import APIRouter, HTTPException, Depends, status, Response, FastAPI, Request
 from fastapi.security import OAuth2PasswordBearer
 from pydantic import EmailStr
 from models import UserRegister, UserLogin, Token
 from database import users_collection
-from auth.auth import verify_password, get_password_hash, create_access_token, create_refresh_token, decode_token
+from auth.auth import verify_password, get_password_hash, create_access_token, create_refresh_token, decode_token, decode_refresh_token
 from typing import Optional
+import os
+from urllib.parse import urlparse
 
 router = APIRouter()
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
 
+def is_same_origin(request: Request) -> bool:
+    """Check if the request is from the same origin as the server"""
+    host = request.headers.get("host", "")
+    origin = request.headers.get("origin", "")
+    
+    if not origin:
+        return False
+    
+    # Extract hostname from origin, handling ports and paths
+    parsed_origin = urlparse(origin)
+    origin_host = parsed_origin.hostname
+    return host == origin_host
+
+def set_auth_cookies(response: Response, access_token: str, refresh_token: str, request: Request):
+    """Set authentication cookies with appropriate SameSite and Secure policies"""
+    is_cross_origin = not is_same_origin(request)
+    
+    # Use secure=True in production for better security
+    cookie_settings = {
+        "httponly": True,
+        "secure": os.getenv("ENVIRONMENT") == "production",  # Secure cookies in production
+        "path": "/",
+        "samesite": "none" if is_cross_origin else "lax"  # None for cross-origin, Lax for same-origin
+    }
+    
+    print(f"Setting cookies with settings: {cookie_settings}")
+    print(f"Is cross-origin: {is_cross_origin}")
+    
+    response.set_cookie(
+        key="accessToken",
+        value=access_token,
+        max_age=15 * 60,  # 15 minutes
+        **cookie_settings
+    )
+    
+    response.set_cookie(
+        key="refreshToken",
+        value=refresh_token,
+        max_age=7 * 24 * 60 * 60,  # 7 days
+        **cookie_settings
+    )
+
 @router.post("/register", response_model=Token)
-async def register(user: UserRegister, response: Response):
+async def register(user: UserRegister, response: Response, request: Request):
+    print(f"=== REGISTER REQUEST DEBUG ===")
+    print(f"Host: {request.headers.get('host')}")
+    print(f"Origin: {request.headers.get('origin')}")
+    print(f"Same origin: {is_same_origin(request)}")
+    
     existing_user = users_collection.find_one({"email": user.email})
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -27,19 +76,17 @@ async def register(user: UserRegister, response: Response):
     access_token = create_access_token(user_data)
     refresh_token = create_refresh_token(user_data)
     
-    response.set_cookie(
-        "accessToken", access_token, httponly=True, secure=False, samesite="lax",
-        max_age=15 * 60
-    )
-    response.set_cookie(
-        "refreshToken", refresh_token, httponly=True, secure=False, samesite="lax",
-        max_age=7 * 24 * 60 * 60
-    )
+    set_auth_cookies(response, access_token, refresh_token, request)
     
     return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
 
 @router.post("/login", response_model=Token)
-async def login(user: UserLogin, response: Response):
+async def login(user: UserLogin, response: Response, request: Request):
+    print(f"=== LOGIN REQUEST DEBUG ===")
+    print(f"Host: {request.headers.get('host')}")
+    print(f"Origin: {request.headers.get('origin')}")
+    print(f"Same origin: {is_same_origin(request)}")
+    
     db_user = users_collection.find_one({"email": user.email})
     if not db_user or not verify_password(user.password, db_user["hashed_password"]):
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -51,20 +98,13 @@ async def login(user: UserLogin, response: Response):
     access_token = create_access_token(user_data)
     refresh_token = create_refresh_token(user_data)
     
-    response.set_cookie(
-        "accessToken", access_token, httponly=True, secure=False, samesite="lax",
-        max_age=15 * 60
-    )
-    response.set_cookie(
-        "refreshToken", refresh_token, httponly=True, secure=False, samesite="lax",
-        max_age=7 * 24 * 60 * 60
-    )
+    set_auth_cookies(response, access_token, refresh_token, request)
     
     return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
 
 @router.post("/refresh", response_model=dict)
-async def refresh_token(refresh_token: str, response: Response):
-    payload = decode_token(refresh_token)
+async def refresh_token(refresh_token: str, response: Response, request: Request):
+    payload = decode_refresh_token(refresh_token)
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Invalid refresh token")
     
@@ -81,14 +121,7 @@ async def refresh_token(refresh_token: str, response: Response):
     access_token = create_access_token(user_data)
     new_refresh_token = create_refresh_token(user_data)
     
-    response.set_cookie(
-        "accessToken", access_token, httponly=True, secure=False, samesite="lax",
-        max_age=15 * 60
-    )
-    response.set_cookie(
-        "refreshToken", new_refresh_token, httponly=True, secure=False, samesite="lax",
-        max_age=7 * 24 * 60 * 60
-    )
+    set_auth_cookies(response, access_token, new_refresh_token, request)
     
     return {
         "message": "Token refreshed",
@@ -96,7 +129,8 @@ async def refresh_token(refresh_token: str, response: Response):
         "refresh_token": new_refresh_token,
         "user": {
             "id": str(db_user["_id"]),
-            "name": user_data["name"]
+            "name": user_data["name"],
+            "email": user_data["sub"]
         }
     }
 
@@ -111,5 +145,6 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         raise HTTPException(status_code=404, detail="User not found")
     
     return {
-        "name": user.get("name", "Unknown")
+        "name": user.get("name", "Unknown"),
+        "email": user.get("email")
     }
