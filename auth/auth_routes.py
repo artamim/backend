@@ -31,13 +31,10 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str, 
     # Use secure=True in production for better security
     cookie_settings = {
         "httponly": True,
-        "secure": os.getenv("ENVIRONMENT") == "production",  # Secure cookies in production
+        "secure": "true",  # Secure cookies in production
         "path": "/",
         "samesite": "none" if is_cross_origin else "lax"  # None for cross-origin, Lax for same-origin
     }
-    
-    print(f"Setting cookies with settings: {cookie_settings}")
-    print(f"Is cross-origin: {is_cross_origin}")
     
     response.set_cookie(
         key="accessToken",
@@ -55,10 +52,6 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str, 
 
 @router.post("/register", response_model=Token)
 async def register(user: UserRegister, response: Response, request: Request):
-    print(f"=== REGISTER REQUEST DEBUG ===")
-    print(f"Host: {request.headers.get('host')}")
-    print(f"Origin: {request.headers.get('origin')}")
-    print(f"Same origin: {is_same_origin(request)}")
     
     existing_user = users_collection.find_one({"email": user.email})
     if existing_user:
@@ -82,10 +75,6 @@ async def register(user: UserRegister, response: Response, request: Request):
 
 @router.post("/login", response_model=Token)
 async def login(user: UserLogin, response: Response, request: Request):
-    print(f"=== LOGIN REQUEST DEBUG ===")
-    print(f"Host: {request.headers.get('host')}")
-    print(f"Origin: {request.headers.get('origin')}")
-    print(f"Same origin: {is_same_origin(request)}")
     
     db_user = users_collection.find_one({"email": user.email})
     if not db_user or not verify_password(user.password, db_user["hashed_password"]):
@@ -99,7 +88,6 @@ async def login(user: UserLogin, response: Response, request: Request):
     refresh_token = create_refresh_token(user_data)
     
     set_auth_cookies(response, access_token, refresh_token, request)
-    
     return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
 
 @router.post("/refresh", response_model=dict)
