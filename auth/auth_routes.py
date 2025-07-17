@@ -1,11 +1,9 @@
-from fastapi import APIRouter, HTTPException, Depends, status, Response, FastAPI, Request
+from fastapi import APIRouter, HTTPException, Depends, Response, Request
 from fastapi.security import OAuth2PasswordBearer
-from pydantic import EmailStr
-from models import UserRegister, UserLogin, Token
+from models import UserRegister, UserLogin, Token, RefreshTokenRequest
 from database import users_collection
 from auth.auth import verify_password, get_password_hash, create_access_token, create_refresh_token, decode_token, decode_refresh_token
-from typing import Optional
-import os
+from pydantic import BaseModel
 from urllib.parse import urlparse
 
 router = APIRouter()
@@ -91,13 +89,14 @@ async def login(user: UserLogin, response: Response, request: Request):
     return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
 
 @router.post("/refresh", response_model=dict)
-async def refresh_token(refresh_token: str, response: Response, request: Request):
+async def refresh_token(refresh_request: RefreshTokenRequest, response: Response, request: Request):
+    refresh_token = refresh_request.refresh_token
+    print("Refresh Token: " + refresh_token)
     payload = decode_refresh_token(refresh_token)
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Invalid refresh token")
     
     email = payload.get("sub")
-    name = payload.get("name", "Unknown")
     db_user = users_collection.find_one({"email": email})
     if not db_user:
         raise HTTPException(status_code=404, detail="User not found")
