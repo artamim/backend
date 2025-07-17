@@ -53,8 +53,7 @@ def decode_token(token: str) -> Optional[Dict]:
             token,
             SECRET_KEY,
             algorithms=[ALGORITHM],
-            options={"verify_exp": True},
-            leeway=10
+            options={"verify_exp": True}
         )
         return payload
     except JWTError as e:
@@ -68,8 +67,7 @@ def decode_refresh_token(token: str) -> Optional[Dict]:
             token,
             SECRET_REFRESH_KEY,
             algorithms=[ALGORITHM],
-            options={"verify_exp": True},
-            leeway=10
+            options={"verify_exp": True}
         )
         return payload
     except JWTError as e:

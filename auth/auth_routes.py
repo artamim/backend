@@ -29,7 +29,7 @@ def set_auth_cookies(response: Response, access_token: str, refresh_token: str, 
     # Use secure=True in production for better security
     cookie_settings = {
         "httponly": True,
-        "secure": "true",  # Secure cookies in production
+        "secure": True,  # Secure cookies in production
         "path": "/",
         "samesite": "none" if is_cross_origin else "lax"  # None for cross-origin, Lax for same-origin
     }
@@ -91,7 +91,6 @@ async def login(user: UserLogin, response: Response, request: Request):
 @router.post("/refresh", response_model=dict)
 async def refresh_token(refresh_request: RefreshTokenRequest, response: Response, request: Request):
     refresh_token = refresh_request.refresh_token
-    print("Refresh Token: " + refresh_token)
     payload = decode_refresh_token(refresh_token)
     if not payload or payload.get("type") != "refresh":
         raise HTTPException(status_code=401, detail="Invalid refresh token")
@@ -107,7 +106,6 @@ async def refresh_token(refresh_request: RefreshTokenRequest, response: Response
     }
     access_token = create_access_token(user_data)
     new_refresh_token = create_refresh_token(user_data)
-    
     set_auth_cookies(response, access_token, new_refresh_token, request)
     
     return {
@@ -118,7 +116,8 @@ async def refresh_token(refresh_request: RefreshTokenRequest, response: Response
             "id": str(db_user["_id"]),
             "name": user_data["name"],
             "email": user_data["sub"]
-        }
+        }, 
+        "token_type": "bearer"
     }
 
 @router.get("/me")
